@@ -20,14 +20,19 @@ Unity フォルダやファイルの有無を確認し無ければ生成する -
 #if UNITY_EDITOR
 using System;
 using System.IO;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 
 public class ScreenCaptureWindow : EditorWindow {
     private Camera targetCamera;
+    private bool overrideTransparentBackground = false;
+
     private Vector2Int customResolution = new Vector2Int(1920, 1080);
     private int selectedPresetIndex = 0;
-    private string[] presetNames = new string[] {
+
+    // 定義済み標準プリセット
+    private readonly string[] builtInPresetNames = new string[] {
         "Game View Size",
         "Full HD (1920x1080)",
         "WQHD (2560x1440)",
@@ -38,13 +43,20 @@ public class ScreenCaptureWindow : EditorWindow {
         "Custom"
     };
 
+    // ユーザー保存プリセット & 履歴 (EditorPrefs保存)
+    private List<string> customPresets = new List<string>();
+    private List<string> resolutionHistory = new List<string>();
+
     private RenderTexture previewRenderTexture;
     private Vector2 scrollPosition;
+
+    private const string PREFS_CUSTOM_PRESETS = "ScreenCapture_CustomPresets";
+    private const string PREFS_HISTORY = "ScreenCapture_ResolutionHistory";
 
     [MenuItem("Tools/Screen Capture")]
     public static void OpenWindow() {
         var window = GetWindow<ScreenCaptureWindow>("Screen Capture");
-        window.minSize = new Vector2(360, 420);
+        window.minSize = new Vector2(380, 520);
         window.Show();
     }
 
@@ -52,10 +64,41 @@ public class ScreenCaptureWindow : EditorWindow {
         if (targetCamera == null) {
             targetCamera = Camera.main;
         }
+        LoadPreferences();
     }
 
     private void OnDisable() {
         CleanupPreviewTexture();
+        SavePreferences();
+    }
+
+    private void LoadPreferences() {
+        customPresets.Clear();
+        string rawCustom = EditorPrefs.GetString(PREFS_CUSTOM_PRESETS, "");
+        if (!string.IsNullOrEmpty(rawCustom)) {
+            customPresets.AddRange(rawCustom.Split(';'));
+        }
+
+        resolutionHistory.Clear();
+        string rawHistory = EditorPrefs.GetString(PREFS_HISTORY, "");
+        if (!string.IsNullOrEmpty(rawHistory)) {
+            resolutionHistory.AddRange(rawHistory.Split(';'));
+        }
+    }
+
+    private void SavePreferences() {
+        EditorPrefs.SetString(PREFS_CUSTOM_PRESETS, string.Join(";", customPresets));
+        EditorPrefs.SetString(PREFS_HISTORY, string.Join(";", resolutionHistory));
+    }
+
+    private void AddToHistory(Vector2Int res) {
+        string entry = $"{res.x}x{res.y}";
+        resolutionHistory.Remove(entry);
+        resolutionHistory.Insert(0, entry);
+        if (resolutionHistory.Count > 5) {
+            resolutionHistory.RemoveAt(resolutionHistory.Count - 1);
+        }
+        SavePreferences();
     }
 
     private void CleanupPreviewTexture() {
@@ -69,18 +112,38 @@ public class ScreenCaptureWindow : EditorWindow {
         }
     }
 
+    private List<string> GetAllPresetNames() {
+        var list = new List<string>(builtInPresetNames);
+        foreach (var cp in customPresets) {
+            list.Add($"[Saved] {cp}");
+        }
+        return list;
+    }
+
     private Vector2Int GetTargetResolution() {
         Vector2 gameViewSize = Handles.GetMainGameViewSize();
-        switch (selectedPresetIndex) {
-            case 0: return new Vector2Int((int)gameViewSize.x, (int)gameViewSize.y);
-            case 1: return new Vector2Int(1920, 1080);
-            case 2: return new Vector2Int(2560, 1440);
-            case 3: return new Vector2Int(3840, 2160);
-            case 4: return new Vector2Int(7680, 4320);
-            case 5: return new Vector2Int((int)gameViewSize.x * 2, (int)gameViewSize.y * 2);
-            case 6: return new Vector2Int((int)gameViewSize.x * 4, (int)gameViewSize.y * 4);
-            case 7: return customResolution;
-            default: return new Vector2Int(1920, 1080);
+        if (selectedPresetIndex < builtInPresetNames.Length) {
+            switch (selectedPresetIndex) {
+                case 0: return new Vector2Int((int)gameViewSize.x, (int)gameViewSize.y);
+                case 1: return new Vector2Int(1920, 1080);
+                case 2: return new Vector2Int(2560, 1440);
+                case 3: return new Vector2Int(3840, 2160);
+                case 4: return new Vector2Int(7680, 4320);
+                case 5: return new Vector2Int((int)gameViewSize.x * 2, (int)gameViewSize.y * 2);
+                case 6: return new Vector2Int((int)gameViewSize.x * 4, (int)gameViewSize.y * 4);
+                case 7: return customResolution;
+                default: return new Vector2Int(1920, 1080);
+            }
+        }
+        else {
+            int customIndex = selectedPresetIndex - builtInPresetNames.Length;
+            if (customIndex >= 0 && customIndex < customPresets.Count) {
+                string[] parts = customPresets[customIndex].Split('x');
+                if (parts.Length == 2 && int.TryParse(parts[0], out int w) && int.TryParse(parts[1], out int h)) {
+                    return new Vector2Int(w, h);
+                }
+            }
+            return new Vector2Int(1920, 1080);
         }
     }
 
@@ -98,22 +161,64 @@ public class ScreenCaptureWindow : EditorWindow {
             EditorGUILayout.HelpBox("Please assign a Target Camera (Camera.main will be used if empty).", MessageType.Warning);
         }
 
-        EditorGUILayout.Space(5);
+        // 背景透過オーバーライド
+        overrideTransparentBackground = EditorGUILayout.Toggle("Transparent Background", overrideTransparentBackground);
+
+        EditorGUILayout.Space(10);
 
         // 解像度プリセット選択
-        selectedPresetIndex = EditorGUILayout.Popup("Resolution Preset", selectedPresetIndex, presetNames);
+        List<string> allPresets = GetAllPresetNames();
+        if (selectedPresetIndex >= allPresets.Count) selectedPresetIndex = 0;
+        selectedPresetIndex = EditorGUILayout.Popup("Resolution Preset", selectedPresetIndex, allPresets.ToArray());
 
-        // カスタム解像度入力
+        // Custom選択時のUI
         if (selectedPresetIndex == 7) {
             EditorGUI.indentLevel++;
             customResolution = EditorGUILayout.Vector2IntField("Custom Resolution", customResolution);
             customResolution.x = Mathf.Max(16, customResolution.x);
             customResolution.y = Mathf.Max(16, customResolution.y);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Save Preset", GUILayout.Width(110))) {
+                string entry = $"{customResolution.x}x{customResolution.y}";
+                if (!customPresets.Contains(entry)) {
+                    customPresets.Add(entry);
+                    SavePreferences();
+                }
+            }
+
+            // 履歴ドロップダウン（最大5件）
+            if (resolutionHistory.Count > 0) {
+                if (EditorGUILayout.DropdownButton(new GUIContent("History (Max 5)"), FocusType.Keyboard, GUILayout.Width(130))) {
+                    GenericMenu menu = new GenericMenu();
+                    foreach (var hist in resolutionHistory) {
+                        menu.AddItem(new GUIContent(hist), false, () => {
+                            string[] parts = hist.Split('x');
+                            if (parts.Length == 2 && int.TryParse(parts[0], out int w) && int.TryParse(parts[1], out int h)) {
+                                customResolution = new Vector2Int(w, h);
+                                Repaint();
+                            }
+                        });
+                    }
+                    menu.ShowAsContext();
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
             EditorGUI.indentLevel--;
+        }
+        else if (selectedPresetIndex >= builtInPresetNames.Length) {
+            // 登録済みカスタムプリセットの削除ボタン
+            int customIndex = selectedPresetIndex - builtInPresetNames.Length;
+            if (GUILayout.Button("Remove Saved Preset", GUILayout.Width(150))) {
+                customPresets.RemoveAt(customIndex);
+                selectedPresetIndex = 0;
+                SavePreferences();
+            }
         }
 
         Vector2Int targetRes = GetTargetResolution();
-        EditorGUILayout.HelpBox($"Output Resolution: {targetRes.x} x {targetRes.y}", MessageType.Info);
+        EditorGUILayout.HelpBox($"Output Resolution: {targetRes.x} x {targetRes.y}{(overrideTransparentBackground ? " (Transparent)" : "")}", MessageType.Info);
 
         if (EditorGUI.EndChangeCheck()) {
             Repaint();
@@ -131,7 +236,9 @@ public class ScreenCaptureWindow : EditorWindow {
         // 撮影ボタン
         GUI.backgroundColor = new Color(0.3f, 0.8f, 0.4f);
         if (GUILayout.Button("Capture Screenshot", GUILayout.Height(40))) {
-            Capture(targetCamera != null ? targetCamera : Camera.main, targetRes.x, targetRes.y);
+            Vector2Int finalRes = GetTargetResolution();
+            AddToHistory(finalRes);
+            Capture(targetCamera != null ? targetCamera : Camera.main, finalRes.x, finalRes.y, overrideTransparentBackground);
         }
         GUI.backgroundColor = Color.white;
 
@@ -155,14 +262,25 @@ public class ScreenCaptureWindow : EditorWindow {
         }
 
         RenderTexture prevTarget = cam.targetTexture;
+        CameraClearFlags prevFlags = cam.clearFlags;
+        Color prevBg = cam.backgroundColor;
+
+        if (overrideTransparentBackground) {
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = new Color(0, 0, 0, 0);
+        }
+
         cam.targetTexture = previewRenderTexture;
         cam.Render();
+
         cam.targetTexture = prevTarget;
+        cam.clearFlags = prevFlags;
+        cam.backgroundColor = prevBg;
 
         GUI.DrawTexture(rect, previewRenderTexture, ScaleMode.ScaleToFit);
     }
 
-    public static void Capture(Camera camera, int width, int height) {
+    public static void Capture(Camera camera, int width, int height, bool transparent) {
         if (camera == null) {
             Debug.LogError("[Screen Capture] No camera assigned for capture.");
             return;
@@ -179,8 +297,15 @@ public class ScreenCaptureWindow : EditorWindow {
 
         RenderTexture prevTarget = camera.targetTexture;
         RenderTexture prevActive = RenderTexture.active;
+        CameraClearFlags prevFlags = camera.clearFlags;
+        Color prevBg = camera.backgroundColor;
 
         try {
+            if (transparent) {
+                camera.clearFlags = CameraClearFlags.SolidColor;
+                camera.backgroundColor = new Color(0, 0, 0, 0);
+            }
+
             camera.targetTexture = render;
             camera.Render();
 
@@ -191,6 +316,8 @@ public class ScreenCaptureWindow : EditorWindow {
         finally {
             camera.targetTexture = prevTarget;
             RenderTexture.active = prevActive;
+            camera.clearFlags = prevFlags;
+            camera.backgroundColor = prevBg;
             DestroyImmediate(render);
         }
 
@@ -202,7 +329,7 @@ public class ScreenCaptureWindow : EditorWindow {
         File.WriteAllBytes(fullPath, texture.EncodeToPNG());
         DestroyImmediate(texture);
 
-        Debug.Log($"[Screen Capture] Saved screenshot ({width}x{height}): {fullPath}");
+        Debug.Log($"[Screen Capture] Saved screenshot ({width}x{height}{(transparent ? ", Transparent" : "")}): {fullPath}");
 
         if (Application.platform == RuntimePlatform.WindowsEditor) {
             string osPath = ($"{Application.dataPath}/../{folderName}/{fileName}").Replace('/', '\\');
