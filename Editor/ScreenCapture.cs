@@ -228,8 +228,7 @@ public class ScreenCaptureWindow : EditorWindow {
 
         // プレビュー表示
         EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
-        Rect previewRect = GUILayoutUtility.GetRect(320, 180, GUILayout.ExpandWidth(true));
-        DrawPreview(previewRect);
+        DrawPreview(targetRes);
 
         EditorGUILayout.Space(15);
 
@@ -245,20 +244,43 @@ public class ScreenCaptureWindow : EditorWindow {
         EditorGUILayout.EndScrollView();
     }
 
-    private void DrawPreview(Rect rect) {
+    private void DrawPreview(Vector2Int targetRes) {
         Camera cam = targetCamera != null ? targetCamera : Camera.main;
+
+        // 余白（左右マージン 15px）
+        float marginHorizontal = 15f;
+        float availableWidth = EditorGUIUtility.currentViewWidth - (marginHorizontal * 2f);
+
+        // プレビューの最大高さを 260px に制限
+        float maxHeight = 260f;
+
+        // アスペクト比計算 (幅 / 高さ)
+        float aspect = (float)targetRes.x / targetRes.y;
+
+        float previewWidth = availableWidth;
+        float previewHeight = previewWidth / aspect;
+
+        if (previewHeight > maxHeight) {
+            previewHeight = maxHeight;
+            previewWidth = previewHeight * aspect;
+        }
+
+        // センタリング配置
+        Rect previewRect = GUILayoutUtility.GetRect(previewWidth, previewHeight, GUILayout.ExpandWidth(false), GUILayout.ExpandHeight(false));
+        previewRect.x = marginHorizontal + (availableWidth - previewWidth) * 0.5f;
+
         if (cam == null) {
-            EditorGUI.DrawRect(rect, Color.black);
-            GUI.Label(rect, "No Camera Available", new GUIStyle(EditorStyles.boldLabel) { alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } });
+            EditorGUI.DrawRect(previewRect, Color.black);
+            GUI.Label(previewRect, "No Camera Available", new GUIStyle(EditorStyles.boldLabel) { alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } });
             return;
         }
 
-        int previewWidth = Mathf.Max(64, (int)rect.width);
-        int previewHeight = Mathf.Max(64, (int)rect.height);
+        int renderWidth = Mathf.Max(64, (int)previewWidth);
+        int renderHeight = Mathf.Max(64, (int)previewHeight);
 
-        if (previewRenderTexture == null || previewRenderTexture.width != previewWidth || previewRenderTexture.height != previewHeight) {
+        if (previewRenderTexture == null || previewRenderTexture.width != renderWidth || previewRenderTexture.height != renderHeight) {
             CleanupPreviewTexture();
-            previewRenderTexture = new RenderTexture(previewWidth, previewHeight, 16, RenderTextureFormat.ARGB32);
+            previewRenderTexture = new RenderTexture(renderWidth, renderHeight, 16, RenderTextureFormat.ARGB32);
         }
 
         RenderTexture prevTarget = cam.targetTexture;
@@ -277,7 +299,7 @@ public class ScreenCaptureWindow : EditorWindow {
         cam.clearFlags = prevFlags;
         cam.backgroundColor = prevBg;
 
-        GUI.DrawTexture(rect, previewRenderTexture, ScaleMode.ScaleToFit);
+        GUI.DrawTexture(previewRect, previewRenderTexture, ScaleMode.ScaleToFit);
     }
 
     public static void Capture(Camera camera, int width, int height, bool transparent) {
