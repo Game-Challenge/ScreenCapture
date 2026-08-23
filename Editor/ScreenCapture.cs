@@ -1,4 +1,4 @@
-﻿/*
+/*
 参考文献
 ～コードのベース～
 [Unity]Unity Editor上でスクリーンショットを撮る方法 - https://nobushiueshi.com/unityunity-editor上でスクリーンショットを撮る方法/
@@ -17,6 +17,7 @@ Unity フォルダやファイルの有無を確認し無ければ生成する -
 [unity]指定されたファイルがどのパスにあるか調べる - https://www.create-forever.games/unity-directory-getfiles/
 */
 
+#if UNITY_EDITOR
 using System;
 using System.IO;
 using UnityEngine;
@@ -92,3 +93,4 @@ public class ScreenCapture {
         }
     }
 }
+#endif
