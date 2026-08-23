@@ -25,13 +25,20 @@ using UnityEngine;
 using UnityEditor;
 
 public class ScreenCaptureWindow : EditorWindow {
+    public enum Language {
+        English = 0,
+        Japanese = 1,
+        Korean = 2,
+        Chinese = 3
+    }
+
+    private Language selectedLanguage = Language.English;
     private Camera targetCamera;
     private bool overrideTransparentBackground = false;
 
     private Vector2Int customResolution = new Vector2Int(1920, 1080);
     private int selectedPresetIndex = 0;
 
-    // 定義済み標準プリセット
     private readonly string[] builtInPresetNames = new string[] {
         "Game View Size",
         "Full HD (1920x1080)",
@@ -43,7 +50,6 @@ public class ScreenCaptureWindow : EditorWindow {
         "Custom"
     };
 
-    // ユーザー保存プリセット & 履歴 (EditorPrefs保存)
     private List<string> customPresets = new List<string>();
     private List<string> resolutionHistory = new List<string>();
 
@@ -52,11 +58,103 @@ public class ScreenCaptureWindow : EditorWindow {
 
     private const string PREFS_CUSTOM_PRESETS = "ScreenCapture_CustomPresets";
     private const string PREFS_HISTORY = "ScreenCapture_ResolutionHistory";
+    private const string PREFS_LANGUAGE = "ScreenCapture_Language";
+
+    // 多言語辞書
+    private static readonly Dictionary<Language, Dictionary<string, string>> L10n = new Dictionary<Language, Dictionary<string, string>>() {
+        {
+            Language.English, new Dictionary<string, string>() {
+                { "Title", "Screen Capture Settings" },
+                { "Language", "Language" },
+                { "TargetCamera", "Target Camera" },
+                { "NoCamWarning", "Please assign a Target Camera (Camera.main will be used if empty)." },
+                { "TransparentBG", "Transparent Background" },
+                { "Preset", "Resolution Preset" },
+                { "CustomRes", "Custom Resolution" },
+                { "SavePreset", "Save Preset" },
+                { "History", "History (Max 5)" },
+                { "RemovePreset", "Remove Saved Preset" },
+                { "OutRes", "Output Resolution" },
+                { "TransparentLabel", "(Transparent)" },
+                { "Preview", "Preview" },
+                { "NoCamText", "No Camera Available" },
+                { "CaptureBtn", "Capture Screenshot" },
+                { "OpenFolderBtn", "Open Screenshot Folder" }
+            }
+        },
+        {
+            Language.Japanese, new Dictionary<string, string>() {
+                { "Title", "スクリーンショット撮影設定" },
+                { "Language", "言語 (Language)" },
+                { "TargetCamera", "撮影対象カメラ" },
+                { "NoCamWarning", "カメラが指定されていません（空の場合は MainCamera が使用されます）。" },
+                { "TransparentBG", "背景を透過表示" },
+                { "Preset", "解像度プリセット" },
+                { "CustomRes", "カスタム解像度" },
+                { "SavePreset", "プリセット保存" },
+                { "History", "撮影履歴 (最大5件)" },
+                { "RemovePreset", "保存済みプリセットを削除" },
+                { "OutRes", "出力解像度" },
+                { "TransparentLabel", "(透過)" },
+                { "Preview", "プレビュー" },
+                { "NoCamText", "利用可能なカメラがありません" },
+                { "CaptureBtn", "スクリーンショット撮影" },
+                { "OpenFolderBtn", "フォルダを開く" }
+            }
+        },
+        {
+            Language.Korean, new Dictionary<string, string>() {
+                { "Title", "스크린샷 촬영 설정" },
+                { "Language", "언어 (Language)" },
+                { "TargetCamera", "대상 카메라" },
+                { "NoCamWarning", "카메라가 지정되지 않았습니다(비어 있으면 MainCamera가 사용됩니다)." },
+                { "TransparentBG", "투명 배경" },
+                { "Preset", "해상도 프리셋" },
+                { "CustomRes", "사용자 지정 해상도" },
+                { "SavePreset", "프리셋 저장" },
+                { "History", "촬영 기록 (최대 5개)" },
+                { "RemovePreset", "저장된 프리셋 삭제" },
+                { "OutRes", "출력 해상도" },
+                { "TransparentLabel", "(투명)" },
+                { "Preview", "미리보기" },
+                { "NoCamText", "사용 가능한 카메라 없음" },
+                { "CaptureBtn", "스크린샷 촬영" },
+                { "OpenFolderBtn", "스크린샷 폴더 열기" }
+            }
+        },
+        {
+            Language.Chinese, new Dictionary<string, string>() {
+                { "Title", "截屏拍摄设置" },
+                { "Language", "语言 (Language)" },
+                { "TargetCamera", "目标摄像机" },
+                { "NoCamWarning", "未指定摄像机（如果为空，将使用 MainCamera）。" },
+                { "TransparentBG", "透明背景" },
+                { "Preset", "分辨率预设" },
+                { "CustomRes", "自定义分辨率" },
+                { "SavePreset", "保存预设" },
+                { "History", "历史记录 (最多5条)" },
+                { "RemovePreset", "删除已保存预设" },
+                { "OutRes", "输出分辨率" },
+                { "TransparentLabel", "(透明)" },
+                { "Preview", "预览" },
+                { "NoCamText", "无可用摄像机" },
+                { "CaptureBtn", "拍摄截屏" },
+                { "OpenFolderBtn", "打开截屏文件夹" }
+            }
+        }
+    };
+
+    private string Tr(string key) {
+        if (L10n.TryGetValue(selectedLanguage, out var dict) && dict.TryGetValue(key, out var val)) {
+            return val;
+        }
+        return L10n[Language.English][key];
+    }
 
     [MenuItem("Tools/Screen Capture")]
     public static void OpenWindow() {
         var window = GetWindow<ScreenCaptureWindow>("Screen Capture");
-        window.minSize = new Vector2(380, 520);
+        window.minSize = new Vector2(380, 560);
         window.Show();
     }
 
@@ -73,6 +171,8 @@ public class ScreenCaptureWindow : EditorWindow {
     }
 
     private void LoadPreferences() {
+        selectedLanguage = (Language)EditorPrefs.GetInt(PREFS_LANGUAGE, (int)Language.English);
+
         customPresets.Clear();
         string rawCustom = EditorPrefs.GetString(PREFS_CUSTOM_PRESETS, "");
         if (!string.IsNullOrEmpty(rawCustom)) {
@@ -87,6 +187,7 @@ public class ScreenCaptureWindow : EditorWindow {
     }
 
     private void SavePreferences() {
+        EditorPrefs.SetInt(PREFS_LANGUAGE, (int)selectedLanguage);
         EditorPrefs.SetString(PREFS_CUSTOM_PRESETS, string.Join(";", customPresets));
         EditorPrefs.SetString(PREFS_HISTORY, string.Join(";", resolutionHistory));
     }
@@ -151,35 +252,41 @@ public class ScreenCaptureWindow : EditorWindow {
         scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
 
         EditorGUILayout.Space(5);
-        EditorGUILayout.LabelField("Screen Capture Settings", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Tr("Title"), EditorStyles.boldLabel);
+        EditorGUILayout.Space(5);
+
+        EditorGUI.BeginChangeCheck();
+
+        // 言語切替
+        selectedLanguage = (Language)EditorGUILayout.EnumPopup(Tr("Language"), selectedLanguage);
+
         EditorGUILayout.Space(5);
 
         // カメラ選択
-        EditorGUI.BeginChangeCheck();
-        targetCamera = (Camera)EditorGUILayout.ObjectField("Target Camera", targetCamera, typeof(Camera), true);
+        targetCamera = (Camera)EditorGUILayout.ObjectField(Tr("TargetCamera"), targetCamera, typeof(Camera), true);
         if (targetCamera == null) {
-            EditorGUILayout.HelpBox("Please assign a Target Camera (Camera.main will be used if empty).", MessageType.Warning);
+            EditorGUILayout.HelpBox(Tr("NoCamWarning"), MessageType.Warning);
         }
 
         // 背景透過オーバーライド
-        overrideTransparentBackground = EditorGUILayout.Toggle("Transparent Background", overrideTransparentBackground);
+        overrideTransparentBackground = EditorGUILayout.Toggle(Tr("TransparentBG"), overrideTransparentBackground);
 
         EditorGUILayout.Space(10);
 
         // 解像度プリセット選択
         List<string> allPresets = GetAllPresetNames();
         if (selectedPresetIndex >= allPresets.Count) selectedPresetIndex = 0;
-        selectedPresetIndex = EditorGUILayout.Popup("Resolution Preset", selectedPresetIndex, allPresets.ToArray());
+        selectedPresetIndex = EditorGUILayout.Popup(Tr("Preset"), selectedPresetIndex, allPresets.ToArray());
 
         // Custom選択時のUI
         if (selectedPresetIndex == 7) {
             EditorGUI.indentLevel++;
-            customResolution = EditorGUILayout.Vector2IntField("Custom Resolution", customResolution);
+            customResolution = EditorGUILayout.Vector2IntField(Tr("CustomRes"), customResolution);
             customResolution.x = Mathf.Max(16, customResolution.x);
             customResolution.y = Mathf.Max(16, customResolution.y);
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Save Preset", GUILayout.Width(110))) {
+            if (GUILayout.Button(Tr("SavePreset"), GUILayout.Width(110))) {
                 string entry = $"{customResolution.x}x{customResolution.y}";
                 if (!customPresets.Contains(entry)) {
                     customPresets.Add(entry);
@@ -187,9 +294,9 @@ public class ScreenCaptureWindow : EditorWindow {
                 }
             }
 
-            // 履歴ドロップダウン（最大5件）
+            // 履歴ドロップダウン
             if (resolutionHistory.Count > 0) {
-                if (EditorGUILayout.DropdownButton(new GUIContent("History (Max 5)"), FocusType.Keyboard, GUILayout.Width(130))) {
+                if (EditorGUILayout.DropdownButton(new GUIContent(Tr("History")), FocusType.Keyboard, GUILayout.Width(150))) {
                     GenericMenu menu = new GenericMenu();
                     foreach (var hist in resolutionHistory) {
                         menu.AddItem(new GUIContent(hist), false, () => {
@@ -208,9 +315,8 @@ public class ScreenCaptureWindow : EditorWindow {
             EditorGUI.indentLevel--;
         }
         else if (selectedPresetIndex >= builtInPresetNames.Length) {
-            // 登録済みカスタムプリセットの削除ボタン
             int customIndex = selectedPresetIndex - builtInPresetNames.Length;
-            if (GUILayout.Button("Remove Saved Preset", GUILayout.Width(150))) {
+            if (GUILayout.Button(Tr("RemovePreset"), GUILayout.Width(160))) {
                 customPresets.RemoveAt(customIndex);
                 selectedPresetIndex = 0;
                 SavePreferences();
@@ -218,7 +324,7 @@ public class ScreenCaptureWindow : EditorWindow {
         }
 
         Vector2Int targetRes = GetTargetResolution();
-        EditorGUILayout.HelpBox($"Output Resolution: {targetRes.x} x {targetRes.y}{(overrideTransparentBackground ? " (Transparent)" : "")}", MessageType.Info);
+        EditorGUILayout.HelpBox($"{Tr("OutRes")}: {targetRes.x} x {targetRes.y}{(overrideTransparentBackground ? " " + Tr("TransparentLabel") : "")}", MessageType.Info);
 
         if (EditorGUI.EndChangeCheck()) {
             Repaint();
@@ -227,19 +333,26 @@ public class ScreenCaptureWindow : EditorWindow {
         EditorGUILayout.Space(10);
 
         // プレビュー表示
-        EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Tr("Preview"), EditorStyles.boldLabel);
         DrawPreview(targetRes);
 
         EditorGUILayout.Space(15);
 
         // 撮影ボタン
         GUI.backgroundColor = new Color(0.3f, 0.8f, 0.4f);
-        if (GUILayout.Button("Capture Screenshot", GUILayout.Height(40))) {
+        if (GUILayout.Button(Tr("CaptureBtn"), GUILayout.Height(40))) {
             Vector2Int finalRes = GetTargetResolution();
             AddToHistory(finalRes);
             Capture(targetCamera != null ? targetCamera : Camera.main, finalRes.x, finalRes.y, overrideTransparentBackground);
         }
         GUI.backgroundColor = Color.white;
+
+        EditorGUILayout.Space(8);
+
+        // フォルダを開くボタン
+        if (GUILayout.Button(Tr("OpenFolderBtn"), GUILayout.Height(26))) {
+            OpenScreenshotFolder();
+        }
 
         EditorGUILayout.EndScrollView();
     }
@@ -247,14 +360,10 @@ public class ScreenCaptureWindow : EditorWindow {
     private void DrawPreview(Vector2Int targetRes) {
         Camera cam = targetCamera != null ? targetCamera : Camera.main;
 
-        // 余白（左右マージン 15px）
         float marginHorizontal = 15f;
         float availableWidth = EditorGUIUtility.currentViewWidth - (marginHorizontal * 2f);
-
-        // プレビューの最大高さを 260px に制限
         float maxHeight = 260f;
 
-        // アスペクト比計算 (幅 / 高さ)
         float aspect = (float)targetRes.x / targetRes.y;
 
         float previewWidth = availableWidth;
@@ -265,13 +374,12 @@ public class ScreenCaptureWindow : EditorWindow {
             previewWidth = previewHeight * aspect;
         }
 
-        // センタリング配置
         Rect previewRect = GUILayoutUtility.GetRect(previewWidth, previewHeight, GUILayout.ExpandWidth(false), GUILayout.ExpandHeight(false));
         previewRect.x = marginHorizontal + (availableWidth - previewWidth) * 0.5f;
 
         if (cam == null) {
             EditorGUI.DrawRect(previewRect, Color.black);
-            GUI.Label(previewRect, "No Camera Available", new GUIStyle(EditorStyles.boldLabel) { alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } });
+            GUI.Label(previewRect, Tr("NoCamText"), new GUIStyle(EditorStyles.boldLabel) { alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } });
             return;
         }
 
@@ -362,6 +470,28 @@ public class ScreenCaptureWindow : EditorWindow {
         }
         else if (Application.platform == RuntimePlatform.LinuxEditor) {
             System.Diagnostics.Process.Start("xdg-open", fullPath);
+        }
+    }
+
+    public static void OpenScreenshotFolder() {
+        string folderName = "Screenshot";
+        if (!Directory.Exists(folderName)) {
+            Directory.CreateDirectory(folderName);
+        }
+
+        string fullFolderPath = Path.GetFullPath(folderName);
+
+        if (Application.platform == RuntimePlatform.WindowsEditor) {
+            System.Diagnostics.Process.Start("explorer.exe", fullFolderPath.Replace('/', '\\'));
+        }
+        else if (Application.platform == RuntimePlatform.OSXEditor) {
+            System.Diagnostics.Process.Start("open", fullFolderPath);
+        }
+        else if (Application.platform == RuntimePlatform.LinuxEditor) {
+            System.Diagnostics.Process.Start("xdg-open", fullFolderPath);
+        }
+        else {
+            Debug.Log($"[Screen Capture] Folder path: {fullFolderPath}");
         }
     }
 }
