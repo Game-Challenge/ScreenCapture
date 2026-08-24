@@ -35,6 +35,7 @@ public class ScreenCaptureWindow : EditorWindow {
     private Language selectedLanguage = Language.English;
     private Camera targetCamera;
     private bool overrideTransparentBackground = false;
+    private bool openExplorerAfterCapture = true;
 
     private Vector2Int customResolution = new Vector2Int(1920, 1080);
     private int selectedPresetIndex = 0;
@@ -59,6 +60,7 @@ public class ScreenCaptureWindow : EditorWindow {
     private const string PREFS_CUSTOM_PRESETS = "ScreenCapture_CustomPresets";
     private const string PREFS_HISTORY = "ScreenCapture_ResolutionHistory";
     private const string PREFS_LANGUAGE = "ScreenCapture_Language";
+    private const string PREFS_OPEN_EXPLORER = "ScreenCapture_OpenExplorerAfterCapture";
 
     // 多言語辞書
     private static readonly Dictionary<Language, Dictionary<string, string>> L10n = new Dictionary<Language, Dictionary<string, string>>() {
@@ -69,6 +71,7 @@ public class ScreenCaptureWindow : EditorWindow {
                 { "TargetCamera", "Target Camera" },
                 { "NoCamWarning", "Please assign a Target Camera (Camera.main will be used if empty)." },
                 { "TransparentBG", "Transparent Background" },
+                { "OpenExplorerToggle", "Open Explorer after capture" },
                 { "Preset", "Resolution Preset" },
                 { "CustomRes", "Custom Resolution" },
                 { "SavePreset", "Save Preset" },
@@ -89,6 +92,7 @@ public class ScreenCaptureWindow : EditorWindow {
                 { "TargetCamera", "撮影対象カメラ" },
                 { "NoCamWarning", "カメラが指定されていません（空の場合は MainCamera が使用されます）。" },
                 { "TransparentBG", "背景を透過表示" },
+                { "OpenExplorerToggle", "撮影後にエクスプローラー（保存先）を開く" },
                 { "Preset", "解像度プリセット" },
                 { "CustomRes", "カスタム解像度" },
                 { "SavePreset", "プリセット保存" },
@@ -109,6 +113,7 @@ public class ScreenCaptureWindow : EditorWindow {
                 { "TargetCamera", "대상 카메라" },
                 { "NoCamWarning", "카메라가 지정되지 않았습니다(비어 있으면 MainCamera가 사용됩니다)." },
                 { "TransparentBG", "투명 배경" },
+                { "OpenExplorerToggle", "촬영 후 탐색기(저장 폴더) 열기" },
                 { "Preset", "해상도 프리셋" },
                 { "CustomRes", "사용자 지정 해상도" },
                 { "SavePreset", "프리셋 저장" },
@@ -129,6 +134,7 @@ public class ScreenCaptureWindow : EditorWindow {
                 { "TargetCamera", "目标摄像机" },
                 { "NoCamWarning", "未指定摄像机（如果为空，将使用 MainCamera）。" },
                 { "TransparentBG", "透明背景" },
+                { "OpenExplorerToggle", "拍摄后打开资源管理器（保存文件夹）" },
                 { "Preset", "分辨率预设" },
                 { "CustomRes", "自定义分辨率" },
                 { "SavePreset", "保存预设" },
@@ -172,6 +178,7 @@ public class ScreenCaptureWindow : EditorWindow {
 
     private void LoadPreferences() {
         selectedLanguage = (Language)EditorPrefs.GetInt(PREFS_LANGUAGE, (int)Language.English);
+        openExplorerAfterCapture = EditorPrefs.GetBool(PREFS_OPEN_EXPLORER, true);
 
         customPresets.Clear();
         string rawCustom = EditorPrefs.GetString(PREFS_CUSTOM_PRESETS, "");
@@ -188,6 +195,7 @@ public class ScreenCaptureWindow : EditorWindow {
 
     private void SavePreferences() {
         EditorPrefs.SetInt(PREFS_LANGUAGE, (int)selectedLanguage);
+        EditorPrefs.SetBool(PREFS_OPEN_EXPLORER, openExplorerAfterCapture);
         EditorPrefs.SetString(PREFS_CUSTOM_PRESETS, string.Join(";", customPresets));
         EditorPrefs.SetString(PREFS_HISTORY, string.Join(";", resolutionHistory));
     }
@@ -271,6 +279,9 @@ public class ScreenCaptureWindow : EditorWindow {
         // 背景透過オーバーライド
         overrideTransparentBackground = EditorGUILayout.Toggle(Tr("TransparentBG"), overrideTransparentBackground);
 
+        // 撮影後にエクスプローラー（保存先）を開く
+        openExplorerAfterCapture = EditorGUILayout.Toggle(Tr("OpenExplorerToggle"), openExplorerAfterCapture);
+
         EditorGUILayout.Space(10);
 
         // 解像度プリセット選択
@@ -343,7 +354,7 @@ public class ScreenCaptureWindow : EditorWindow {
         if (GUILayout.Button(Tr("CaptureBtn"), GUILayout.Height(40))) {
             Vector2Int finalRes = GetTargetResolution();
             AddToHistory(finalRes);
-            Capture(targetCamera != null ? targetCamera : Camera.main, finalRes.x, finalRes.y, overrideTransparentBackground);
+            Capture(targetCamera != null ? targetCamera : Camera.main, finalRes.x, finalRes.y, overrideTransparentBackground, openExplorerAfterCapture);
         }
         GUI.backgroundColor = Color.white;
 
@@ -410,7 +421,7 @@ public class ScreenCaptureWindow : EditorWindow {
         GUI.DrawTexture(previewRect, previewRenderTexture, ScaleMode.ScaleToFit);
     }
 
-    public static void Capture(Camera camera, int width, int height, bool transparent) {
+    public static void Capture(Camera camera, int width, int height, bool transparent, bool openExplorer = true) {
         if (camera == null) {
             Debug.LogError("[Screen Capture] No camera assigned for capture.");
             return;
@@ -461,15 +472,17 @@ public class ScreenCaptureWindow : EditorWindow {
 
         Debug.Log($"[Screen Capture] Saved screenshot ({width}x{height}{(transparent ? ", Transparent" : "")}): {fullPath}");
 
-        if (Application.platform == RuntimePlatform.WindowsEditor) {
-            string osPath = ($"{Application.dataPath}/../{folderName}/{fileName}").Replace('/', '\\');
-            System.Diagnostics.Process.Start("explorer.exe", $"/select,{osPath}");
-        }
-        else if (Application.platform == RuntimePlatform.OSXEditor) {
-            System.Diagnostics.Process.Start("open", fullPath);
-        }
-        else if (Application.platform == RuntimePlatform.LinuxEditor) {
-            System.Diagnostics.Process.Start("xdg-open", fullPath);
+        if (openExplorer) {
+            if (Application.platform == RuntimePlatform.WindowsEditor) {
+                string osPath = ($"{Application.dataPath}/../{folderName}/{fileName}").Replace('/', '\\');
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,{osPath}");
+            }
+            else if (Application.platform == RuntimePlatform.OSXEditor) {
+                System.Diagnostics.Process.Start("open", fullPath);
+            }
+            else if (Application.platform == RuntimePlatform.LinuxEditor) {
+                System.Diagnostics.Process.Start("xdg-open", fullPath);
+            }
         }
     }
 
